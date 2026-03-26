@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Кабинет инженера</title>
+
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body { font-family: Arial; padding:20px; background:#f5f7fa; }
+.container { max-width:1000px; margin:auto; }
+.card { background:white; padding:20px; border-radius:12px; margin-bottom:20px; box-shadow:0 2px 10px rgba(0,0,0,0.05);}
+h2 { margin-top:0; }
+table { width:100%; border-collapse:collapse; }
+td, th { padding:10px; border-bottom:1px solid #eee; text-align:left; }
+button { padding:10px 15px; background:#2d8cf0; color:white; border:none; border-radius:6px; cursor:pointer; }
+button:hover { background:#1a73e8; }
+.summary { font-size:16px; line-height:1.6; }
+.progress-bar {
+  height: 20px;
+  background: #eee;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top:10px;
+}
+.progress {
+  height:100%;
+  background:#2d8cf0;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="card">
+<h2>📊 Статистика инженера</h2>
+
+<label>С:</label>
+<input type="date" id="from">
+
+<label>По:</label>
+<input type="date" id="to">
+
+<button onclick="loadDeals()">Показать</button>
+</div>
+
+<div class="card">
+<h3>Итого</h3>
+<div class="summary" id="summary"></div>
+
+<div class="progress-bar">
+  <div id="progress" class="progress"></div>
+</div>
+
+</div>
+
+<div class="card">
+<canvas id="chart"></canvas>
+</div>
+
+<div class="card">
+<h3>Сделки</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Название</th>
+<th>Сумма</th>
+<th>Дата</th>
+</tr>
+</thead>
+<tbody id="deals"></tbody>
+</table>
+</div>
+
+</div>
+
+<script>
+let chart;
+
+// автоподстановка текущего месяца
+window.onload = function(){
+  let today = new Date();
+  let firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  document.getElementById("from").value = firstDay.toISOString().split('T')[0];
+  document.getElementById("to").value = today.toISOString().split('T')[0];
+};
+
+function loadDeals(){
+
+  let from = document.getElementById("from").value;
+  let to = document.getElementById("to").value;
+
+  BX24.callMethod(
+    'crm.deal.list',
+    {
+      filter: {
+        ASSIGNED_BY_ID: BX24.getAuth().user_id,
+        STAGE_SEMANTIC_ID: "S",
+        ">=CLOSEDATE": from,
+        "<=CLOSEDATE": to
+      },
+      select: ["ID","TITLE","OPPORTUNITY","CLOSEDATE"]
+    },
+    function(result){
+
+      if(result.error()){
+        alert("Ошибка: " + result.error());
+        return;
+      }
+
+      let deals = result.data();
+
+      let total = 0;
+      let table = "";
+      let daily = {};
+
+      deals.forEach(d => {
+
+        let sum = parseFloat(d.OPPORTUNITY || 0);
+        total += sum;
+
+        let date = d.CLOSEDATE.split("T")[0];
+
+        if(!daily[date]) daily[date] = 0;
+        daily[date] += sum;
+
+        table += `
+        <tr>
+          <td>${d.ID}</td>
+          <td>${d.TITLE}</td>
+          <td>${sum.toLocaleString()}</td>
+          <td>${date}</td>
+        </tr>`;
+      });
+
+      document.getElementById("deals").innerHTML = table;
+
+      let bonus = total > 150000 ? (total - 150000) * 0.07 : 0;
+      let progress = Math.min((total / 150000) * 100, 100);
+
+      document.getElementById("summary").innerHTML =
+        `Сделок: ${deals.length}<br>
+         Сумма: ${total.toLocaleString()} ₽<br>
+         Бонус: ${bonus.toLocaleString()} ₽`;
+
+      document.getElementById("progress").style.width = progress + "%";
+
+      drawChart(daily);
+    }
+  );
+}
+
+function drawChart(data){
+
+  let labels = Object.keys(data);
+  let values = Object.values(data);
+
+  if(chart) chart.destroy();
+
+  chart = new Chart(document.getElementById("chart"), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Сумма по дням',
+        data: values
+      }]
+    }
+  });
+}
+</script>
+
+</body>
+</html>
