@@ -17,17 +17,8 @@ td, th { padding:10px; border-bottom:1px solid #eee; text-align:left; }
 button { padding:10px 15px; background:#2d8cf0; color:white; border:none; border-radius:6px; cursor:pointer; }
 button:hover { background:#1a73e8; }
 .summary { font-size:16px; line-height:1.6; }
-.progress-bar {
-  height: 20px;
-  background: #eee;
-  border-radius: 10px;
-  overflow: hidden;
-  margin-top:10px;
-}
-.progress {
-  height:100%;
-  background:#2d8cf0;
-}
+.progress-bar { height: 20px; background: #eee; border-radius: 10px; overflow: hidden; margin-top:10px; }
+.progress { height:100%; background:#2d8cf0; }
 </style>
 </head>
 
@@ -44,17 +35,17 @@ button:hover { background:#1a73e8; }
 <label>По:</label>
 <input type="date" id="to">
 
+<span id="engineer-container"></span>
+
 <button onclick="loadDeals()">Показать</button>
 </div>
 
 <div class="card">
 <h3>Итого</h3>
 <div class="summary" id="summary"></div>
-
 <div class="progress-bar">
   <div id="progress" class="progress"></div>
 </div>
-
 </div>
 
 <div class="card">
@@ -80,26 +71,62 @@ button:hover { background:#1a73e8; }
 
 <script>
 let chart;
+let currentUserId;
+let isAdmin = false;
 
-// автоподстановка текущего месяца
+// автоподстановка текущего месяца и определение роли
 window.onload = function(){
-  let today = new Date();
-  let firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  BX24.callMethod('user.current', {}, function(result){
+    let user = result.data();
+    currentUserId = user.ID;
 
-  document.getElementById("from").value = firstDay.toISOString().split('T')[0];
-  document.getElementById("to").value = today.toISOString().split('T')[0];
+    // проверка роли
+    isAdmin = (user.IS_ADMIN === true);
+
+    let container = document.getElementById("engineer-container");
+    if(isAdmin){
+      // для админа добавляем селектор инженеров
+      container.innerHTML = '<label>Инженер:</label><select id="engineer"><option value="CURRENT">Мой профиль</option></select>';
+      loadEngineers();
+    }
+
+    let today = new Date();
+    let firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    document.getElementById("from").value = firstDay.toISOString().split('T')[0];
+    document.getElementById("to").value = today.toISOString().split('T')[0];
+  });
 };
 
-function loadDeals(){
+// загрузка сотрудников для админа
+function loadEngineers() {
+  BX24.callMethod('user.get', { select: ['ID','NAME','LAST_NAME'] }, function(result){
+    let users = result.data();
+    let select = document.getElementById("engineer");
 
+    users.forEach(u => {
+      let name = u.NAME + " " + u.LAST_NAME;
+      select.innerHTML += `<option value="${u.ID}">${name}</option>`;
+    });
+  });
+}
+
+// загрузка сделок
+function loadDeals(){
   let from = document.getElementById("from").value;
   let to = document.getElementById("to").value;
+
+  let engineerId = currentUserId; // по умолчанию инженер видит только свои сделки
+
+  if(isAdmin){
+    let select = document.getElementById("engineer");
+    engineerId = (select.value === "CURRENT") ? currentUserId : select.value;
+  }
 
   BX24.callMethod(
     'crm.deal.list',
     {
       filter: {
-        ASSIGNED_BY_ID: BX24.getAuth().user_id,
+        ASSIGNED_BY_ID: engineerId,
         STAGE_SEMANTIC_ID: "S",
         ">=CLOSEDATE": from,
         "<=CLOSEDATE": to
@@ -107,35 +134,30 @@ function loadDeals(){
       select: ["ID","TITLE","OPPORTUNITY","CLOSEDATE"]
     },
     function(result){
-
       if(result.error()){
         alert("Ошибка: " + result.error());
         return;
       }
 
       let deals = result.data();
-
       let total = 0;
       let table = "";
       let daily = {};
 
       deals.forEach(d => {
-
         let sum = parseFloat(d.OPPORTUNITY || 0);
         total += sum;
 
         let date = d.CLOSEDATE.split("T")[0];
-
         if(!daily[date]) daily[date] = 0;
         daily[date] += sum;
 
-        table += `
-        <tr>
-          <td>${d.ID}</td>
-          <td>${d.TITLE}</td>
-          <td>${sum.toLocaleString()}</td>
-          <td>${date}</td>
-        </tr>`;
+        table += `<tr>
+                    <td>${d.ID}</td>
+                    <td>${d.TITLE}</td>
+                    <td>${sum.toLocaleString()}</td>
+                    <td>${date}</td>
+                  </tr>`;
       });
 
       document.getElementById("deals").innerHTML = table;
@@ -156,7 +178,6 @@ function loadDeals(){
 }
 
 function drawChart(data){
-
   let labels = Object.keys(data);
   let values = Object.values(data);
 
@@ -168,9 +189,11 @@ function drawChart(data){
       labels: labels,
       datasets: [{
         label: 'Сумма по дням',
-        data: values
+        data: values,
+        backgroundColor: '#2d8cf0'
       }]
-    }
+    },
+    options: { responsive: true }
   });
 }
 </script>
